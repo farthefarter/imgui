@@ -1,0 +1,356 @@
+-- // BUILD WHICH WOULD RESULT IN SIGNIFICANTLY LESS VARIABLE COUNT! // -
+
+function Fetch(frameworkType, helper)
+    return loadstring(game:HttpGet(('https://raw.githubusercontent.com/blocktaco/ImGuiRipoff/main/Main/%s/%s.lua'):format(frameworkType, helper)))()
+end
+
+local Framework = {
+    Core = {
+        Elements = Fetch('Core', 'Elements'),
+        UpdateManager = Fetch('Core', 'UpdateManager')
+    },
+    Helpers = {
+        Easing = Fetch('Helpers', 'Easing'),
+        Draw = Fetch('Helpers', 'Draw'),
+        Input = Fetch('Helpers', 'Input')
+    }
+}
+
+function Framework:CreateVirtualCursor()
+    local virtualCursor = Framework.Helpers.Draw:Add({Type = 'Image', ZIndex = 2, Size = Vector2.new(64, 64), Center = true, Position = Framework.Helpers.Input:GetMouseLocation(), Data = 'https://i.imgur.com/vTVRR9A.png'})
+
+    Framework.Core.UpdateManager:Bind('virtualCursorUpdate', function()
+        Framework.Helpers.Draw:Update(virtualCursor, 'Position', Framework.Helpers.Input:GetMouseLocation() - Vector2.new(32, 32))
+    end)
+end
+
+function Framework:NewProject()
+    if Framework.Project or shared.Framework then warn('Cannot have multiple projects in one session.') return; end
+
+    Framework.Project = {
+        Properties = {
+            Keybind = Enum.KeyCode.RightControl
+        },
+        HasElementInput = false,
+        GroupAssigned = nil,
+        FormCache = {},
+        Values = {} -- Meant to fetch elements easily using IDs
+    }
+    shared.Framework = Framework
+end
+
+function Framework:NewForm(name, isHeader)
+    if not Framework.Project then warn('Project not found.') return; end
+    if Framework.Project.FormCache[name] then warn(('Duplicate form "%s" found.'):format(name)) return; end
+    if #Framework.Project.FormCache > 0 then warn('Multiple forms are not supported. Please try again when they are.') return; end
+    if not type(name) == 'string' then warn('Name is required.') return; end
+    local Form = {Properties = {Name = name, Active = true, Dragging = false}, GroupCache = {}}    
+
+    Form.RemoveInput = Instance.new('ScreenGui') -- // Soaks any input when window is focused
+    Form.RemoveInput.Name = game:GetService('HttpService'):GenerateGUID(false)
+    Form.RemoveInput.Parent = game.CoreGui
+
+    Form.RemoveFrame = Instance.new('Frame')
+    Form.RemoveFrame.Name = 'RemoveFrame'
+    Form.RemoveFrame.Parent = Form.RemoveInput
+    Form.RemoveFrame.Size = UDim2.new(0, 400, 0, 500)
+    Form.RemoveFrame.Active = true
+    Form.RemoveFrame.Transparency = 1
+
+    Form.Modal = Instance.new('TextButton')
+    Form.Modal.Name = 'Modal'
+    Form.Modal.Parent = Form.RemoveInput
+    Form.Modal.Text = ''
+    Form.Modal.Modal = true
+
+    local DragStart = Vector2.new()
+    local StartingPosition = Vector2.new()
+
+    Form.Outline = Framework.Helpers.Draw:Add({Type = 'Image', Center = true, Size = Vector2.new(400, 500), Position = Vector2.new(workspace.Camera.ViewportSize.X / 2, workspace.Camera.ViewportSize.Y / 2), Transparency = 0, Data = 'https://i.imgur.com/jbnlhNa.png'})
+    Form.Inline = Framework.Helpers.Draw:Add({Type = 'Image', Size = Vector2.new(398, 498), Position = Form.Outline.Position + Vector2.new(1, 1), Transparency = 0.975, Data = 'https://i.imgur.com/biJIC60.png'}) -- https://i.imgur.com/vIRK1Vn.png  https://i.imgur.com/xp3Xohj.png
+    --Form.Resize = Framework.Helpers.Draw:Add({Type = 'Image', Size = Vector2.new(16, 16), Position = (Form.Outline.Position + Form.Outline.Size) - Vector2.new(17, 17), Transparency = 1, Data = 'https://i.imgur.com/6hHDRBY.png'}) -- https://i.imgur.com/vIRK1Vn.png  https://i.imgur.com/xp3Xohj.png
+    Form.RemoveFrame.Position = UDim2.new(0, Form.Outline.Position.X, 0, Form.Outline.Position.Y - 36)
+
+    if isHeader then
+        Form.Header = {}
+        Form.Header.Corner1 = Framework.Helpers.Draw:Add({Type = 'Circle', Radius = 9.5, Filled = true, Color = Color3.fromRGB(39, 74, 118), Position = Form.Inline.Position + Vector2.new(9.5, 9.5)})
+        Form.Header.Corner2 = Framework.Helpers.Draw:Add({Type = 'Circle', Radius = 9.5, Filled = true, Color = Color3.fromRGB(39, 74, 118), Position = Form.Inline.Position + Vector2.new(Form.Inline.Size.X - 9.5, 9.5)})
+        Form.Header.Filler1 = Framework.Helpers.Draw:Add({Type = 'Square', Size = Vector2.new(379, 19), Color = Color3.fromRGB(39, 74, 118), Position = Form.Header.Corner1.Position - Vector2.new(0, 9.5)})
+        Form.Header.Filler2 = Framework.Helpers.Draw:Add({Type = 'Square', Size = Vector2.new(398, 9.5), Color = Color3.fromRGB(39, 74, 118), Position = Form.Header.Corner1.Position - Vector2.new(9.5, 0)})
+        Form.Header.Collapse = Framework.Helpers.Draw:Add({Type = 'Triangle', Color = Color3.new(1, 1, 1), Points = {A = Form.Inline.Position + Vector2.new(6, 6), B = Form.Inline.Position + Vector2.new(15, 6), C = Form.Inline.Position + Vector2.new(10.5, 14)}})
+        Form.Header.HeaderName = Framework.Helpers.Draw:Add({Type = 'Text', Position = Form.Inline.Position + Vector2.new(21, 3), Color = Color3.new(1, 1, 1), Text = name})
+    end
+
+    function Form:Update(position)
+        Framework.Helpers.Draw:Update(Form.Outline, 'Position', position)
+        Framework.Helpers.Draw:Update(Form.Inline, 'Position', position + Vector2.new(1, 1))
+        --Framework.Helpers.Draw:Update(Form.Resize, 'Position', (Form.Outline.Position + Form.Outline.Size) - Vector2.new(17, 17))
+        Form.RemoveFrame.Position = UDim2.new(0, Form.Outline.Position.X, 0, Form.Outline.Position.Y - 36) -- 36 represents the GUIInset, removing it allows perfect position.
+
+        if Form.GroupDivider then
+            Framework.Helpers.Draw:Update(Form.GroupDivider, 'Position', position + Vector2.new(4, 44))
+        end
+
+        if Form.Header then
+            Framework.Helpers.Draw:Update(Form.Header.Corner1, 'Position', Form.Inline.Position + Vector2.new(9.5, 9.5))
+            Framework.Helpers.Draw:Update(Form.Header.Corner2, 'Position', Form.Inline.Position + Vector2.new(Form.Inline.Size.X - 9.5, 9.5))
+            Framework.Helpers.Draw:Update(Form.Header.Filler1, 'Position', Form.Header.Corner1.Position - Vector2.new(0, 9.5))
+            Framework.Helpers.Draw:Update(Form.Header.Filler2, 'Position', Form.Header.Corner1.Position - Vector2.new(9.5, 0))
+            Framework.Helpers.Draw:Update(Form.Header.Collapse, 'Points', {A = Form.Inline.Position + Vector2.new(6, 6), B = Form.Inline.Position + Vector2.new(15, 6), C = Form.Inline.Position + Vector2.new(10.5, 14)})
+            Framework.Helpers.Draw:Update(Form.Header.HeaderName, 'Position', Form.Inline.Position + Vector2.new(21, 3))
+        end
+
+        for _, Group in next, Form.GroupCache do
+            Group:Update(position)
+        end
+    end
+
+    function Form.Show()
+        Framework.Helpers.Draw:Update(Form.Outline, 'Visible', true)
+        Framework.Helpers.Draw:Update(Form.Inline, 'Visible', true)
+        --Framework.Helpers.Draw:Update(Form.Resize, 'Visible', true)
+        Form.RemoveFrame.Active = true
+        Form.Modal.Modal = true
+
+        if Form.Header then
+            Framework.Helpers.Draw:Update(Form.Header.Corner1, 'Visible', true)
+            Framework.Helpers.Draw:Update(Form.Header.Corner2, 'Visible', true)
+            Framework.Helpers.Draw:Update(Form.Header.Filler1, 'Visible', true)
+            Framework.Helpers.Draw:Update(Form.Header.Filler2, 'Visible', true)
+            Framework.Helpers.Draw:Update(Form.Header.Collapse, 'Visible', true)
+            Framework.Helpers.Draw:Update(Form.Header.HeaderName, 'Visible', true)
+        end
+        
+        for _, Group in next, Form.GroupCache do
+            Group.Show()
+        end
+    end
+
+    function Form.Hide()
+        Framework.Helpers.Draw:Update(Form.Outline, 'Visible', false)
+        Framework.Helpers.Draw:Update(Form.Inline, 'Visible', false)
+        --Framework.Helpers.Draw:Update(Form.Resize, 'Visible', false)
+        Form.RemoveFrame.Active = false
+        Form.Modal.Modal = false
+        
+        if Form.Header then
+            Framework.Helpers.Draw:Update(Form.Header.Corner1, 'Visible', false)
+            Framework.Helpers.Draw:Update(Form.Header.Corner2, 'Visible', false)
+            Framework.Helpers.Draw:Update(Form.Header.Filler1, 'Visible', false)
+            Framework.Helpers.Draw:Update(Form.Header.Filler2, 'Visible', false)
+            Framework.Helpers.Draw:Update(Form.Header.Collapse, 'Visible', false)
+            Framework.Helpers.Draw:Update(Form.Header.HeaderName, 'Visible', false)
+        end
+
+        for _, Group in next, Form.GroupCache do
+            Group.Hide()
+        end
+    end
+
+    function Form:NewInput(inputState, inputObject)
+        if inputObject.UserInputType == Enum.UserInputType.MouseButton1 then
+            if inputState == Enum.UserInputState.Begin then
+                if Framework.Helpers.Input:WithinMouseBounds(Form.Outline) then
+                    Form.Properties.Dragging = true
+                    DragStart = Vector2.new(inputObject.Position.X, inputObject.Position.Y)
+                    StartingPosition = Form.Outline.Position
+                end
+            end
+        end
+
+        if inputObject.UserInputType == Enum.UserInputType.MouseButton1 and inputState == Enum.UserInputState.End then
+            Form.Properties.Dragging = false
+        end
+
+        if inputObject.UserInputType == Enum.UserInputType.MouseMovement and Form.Properties.Dragging then
+            Form:Update(StartingPosition + (Vector2.new(inputObject.Position.X, inputObject.Position.Y) - DragStart))
+        end
+
+        if inputObject.KeyCode == Framework.Project.Properties.Keybind and inputState == Enum.UserInputState.Begin then
+            Form.Properties.Active = not Form.Properties.Active
+            Form.Properties.Dragging = false
+            if Form.Properties.Active then
+                Form.Show()
+            elseif not Form.Properties.Active then
+                Form.Hide()
+            end 
+        end
+    end
+
+    Framework.Helpers.Input:NewListener('MouseButton1', Form)
+    Framework.Helpers.Input:NewListener('MouseMovement', Form)
+    Framework.Helpers.Input:NewListener('Keyboard', Form)
+    table.insert(Framework.Project.FormCache, Form)
+end
+
+function Framework:Assign(assigned)
+    Framework.Project.GroupAssigned = assigned
+
+    for _, Group in next, Framework.Project.FormCache[#Framework.Project.FormCache].GroupCache do
+        if assigned == Group then
+            for _, Element in next, Group.ElementCache do
+                Element.Show()
+            end
+        else
+            for _, Element in next, Group.ElementCache do
+                Element.Hide()
+            end
+        end
+    end
+end
+
+function Framework:NewGroup(name)
+    local Offset = 0
+    local ElementOffset = 0
+
+    local Group = {Properties = {HasInput = false, Active = true, Name = name}, ElementCache = {}}
+
+    function Group:CalculateGroupOffset()
+        return (Framework.Project.FormCache[#Framework.Project.FormCache].GroupDivider.Position - Vector2.new(((-Offset - ((table.find(Framework.Project.FormCache[#Framework.Project.FormCache].GroupCache, Group) or #Framework.Project.FormCache[#Framework.Project.FormCache].GroupCache + 1) * 8))) + 4, 19)) - Vector2.new(2, 0)
+    end 
+
+    function Group:UpdateOffset(index)
+        for i, v in next, Framework.Project.FormCache[#Framework.Project.FormCache].GroupCache do
+            if i >= index then break; end
+
+            Offset = Offset + v.Background.Size.X
+        end
+        return
+    end
+
+    function Group:UpdateElementOffset(index)
+        ElementOffset = 0
+        for i, v in next, Group.ElementCache do
+            if i >= index then break; end
+
+            ElementOffset = ElementOffset + v.Base.Size.Y + 4
+        end
+        return
+    end
+
+    function Group:CalculateElementPosition()
+        return (Framework.Project.FormCache[#Framework.Project.FormCache].GroupDivider.Position + Vector2.new(4, 5) + Vector2.new(0, ElementOffset)) - Vector2.new(2, 1)
+    end
+
+    if not Framework.Project.FormCache[#Framework.Project.FormCache].GroupDivider then 
+        Framework.Project.FormCache[#Framework.Project.FormCache].GroupDivider = Framework.Helpers.Draw:Add({Type = 'Square', Visible = false, Size = Vector2.new(392, 1), Position = Framework.Project.FormCache[#Framework.Project.FormCache].Inline.Position + Vector2.new(3, 43), Color = Color3.fromRGB(51, 105, 173)})
+        Framework.Helpers.Draw:Update(Framework.Project.FormCache[#Framework.Project.FormCache].GroupDivider, 'Visible', false)
+    end
+
+    Group:UpdateOffset(#Framework.Project.FormCache[#Framework.Project.FormCache].GroupCache + 1)
+
+    Group.Background = Framework.Helpers.Draw:Add({Type = 'Square', Size = Vector2.new(0, 19), Position = Group:CalculateGroupOffset(), Color = Color3.fromRGB(41, 80, 132)})
+    Group.Text = Framework.Helpers.Draw:Add({Type = 'Text', Position = Vector2.new(), Color = Color3.new(1, 1, 1), Text = name})
+
+    Framework.Helpers.Draw:Update(Group.Background, 'Size', Vector2.new(Group.Background.Size.X + Group.Text.TextBounds.X + 7, Group.Background.Size.Y))
+    Framework.Helpers.Draw:Update(Group.Text, 'Position', Group.Background.Position + Vector2.new(4, 3))
+
+    function Group:Update(position)
+        Offset = 0
+        Group:UpdateOffset(table.find(Framework.Project.FormCache[#Framework.Project.FormCache].GroupCache, Group))
+
+        Framework.Helpers.Draw:Update(Group.Background, 'Position', Group:CalculateGroupOffset())
+        Framework.Helpers.Draw:Update(Group.Text, 'Position', Group.Background.Position + Vector2.new(4, 3))
+
+        for index, Element in next, Group.ElementCache do
+            Group:UpdateElementOffset(index)
+            Element.Base.Position = Group:CalculateElementPosition()
+            Element:Update(position)
+        end
+    end
+
+    function Group.Show()
+        Group.Properties.Active = true
+
+        Framework.Helpers.Draw:Update(Group.Background, 'Visible', true)
+        Framework.Helpers.Draw:Update(Group.Text, 'Visible', true)
+
+        for _, Element in next, Group.ElementCache do
+            Element.Show()
+        end
+    end
+
+    function Group.Hide()
+        Group.Properties.Active = false
+
+        Framework.Helpers.Draw:Update(Group.Background, 'Visible', false)
+        Framework.Helpers.Draw:Update(Group.Text, 'Visible', false)
+
+        for _, Element in next, Group.ElementCache do
+            Element.Hide()
+        end
+    end
+
+    function Group:NewInput(inputState, inputObject)
+        local MouseBounds = Framework.Helpers.Input:WithinMouseBounds(Group.Background)
+
+        if MouseBounds and table.find(Framework.Helpers.Input:GetInputs(), Enum.UserInputType.MouseButton1) and not Framework.Project.HasElementInput then
+            Group.Properties.HasInput = true
+        end
+
+        if inputObject.UserInputType == Enum.UserInputType.MouseButton1 and inputState == Enum.UserInputState.End and Group.Properties.HasInput and not Framework.Project.HasElementInput then
+            Group.Properties.HasInput = false
+            Framework:Assign(Group)
+        end
+
+        if MouseBounds then
+            if inputObject.UserInputType == Enum.UserInputType.MouseMovement then
+                Framework.Helpers.Draw:Update(Group.Background, 'Color', Color3.fromRGB(64, 125, 207))
+            end
+        else
+            Framework.Helpers.Draw:Update(Group.Background, 'Color', Color3.fromRGB(41, 80, 132))
+        end
+    end
+
+    Framework.Helpers.Input:NewListener('MouseButton1', Group)
+    Framework.Helpers.Input:NewListener('MouseMovement', Group)
+    table.insert(Framework.Project.FormCache[#Framework.Project.FormCache].GroupCache, Group)
+end
+
+function Framework:NewElement(data)
+    if not data.ID then warn('Element ID is required.') return; end
+    if not data.Name then warn('Element Name/Text is required.') return; end
+    if Framework.Core.Elements[data.ID] then warn('Element ID is already occupied.') return; end
+    if not Framework.Core.Elements[data.Type] then warn('Element Type does not exist.') return; end
+
+    local Element = Framework.Core.Elements[data.Type](data)
+    Element.Properties.Type = data.Type
+    
+    Framework.Helpers.Input:NewListener('MouseButton1', Element)
+    Framework.Helpers.Input:NewListener('MouseMovement', Element)
+
+    table.insert(Framework.Project.FormCache[#Framework.Project.FormCache].GroupCache[#Framework.Project.FormCache[#Framework.Project.FormCache].GroupCache].ElementCache, Element)
+    Framework.Project.Values[data.ID] = Element
+
+    Framework.Project.FormCache[#Framework.Project.FormCache].GroupCache[#Framework.Project.FormCache[#Framework.Project.FormCache].GroupCache]:UpdateElementOffset(#Framework.Project.FormCache[#Framework.Project.FormCache].GroupCache[#Framework.Project.FormCache[#Framework.Project.FormCache].GroupCache].ElementCache)
+    Element.Base.Position = Framework.Project.FormCache[#Framework.Project.FormCache].GroupCache[#Framework.Project.FormCache[#Framework.Project.FormCache].GroupCache]:CalculateElementPosition()
+    Element:Update()
+
+    return Element
+end
+
+function Framework:GetElement(id)
+    return Framework.Project.Values[id]
+end
+
+function Framework:GetValue(id)
+    return Framework:GetElement(id).Properties.Value
+end
+
+function Framework:SetCallback(id, callback)
+    Framework.Project.Values[id].Properties.Callback = callback
+end
+
+function Framework:Initialize()
+    Framework.Helpers.Input:Listen()
+    Framework:CreateVirtualCursor()
+    Framework:Assign(Framework.Project.FormCache[#Framework.Project.FormCache].GroupCache[1])
+end
+
+function Framework:Shutdown()
+    Framework.Helpers.Input:Deafen()
+    Framework.Core.UpdateManager:Shutdown()
+    Framework.Helpers.Draw:Shutdown()
+end
+
+return Framework
